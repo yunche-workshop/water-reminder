@@ -16,6 +16,7 @@ test_core.py —— 数据/配置/时间判断的单元测试（纯标准库，�
 import datetime as dt
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -244,9 +245,13 @@ class TestStore(TempCase):
         self.store = core.Store(self.path("data"))
 
     def test_add_and_total(self):
+        # 以前这里写的是 add(250, now=dt.datetime(2026, 10, 9, ...)) 再 total(today_key())。
+        # 记录落在 10-09 那一格、读的是"今天"那一格，只有在写它的那天跑才恰好相等，
+        # 第二天（10-10）必红——数据层没坏，坏的是这个用例自己。
+        # 要冻结时间就得连 day 一起从同一个 now 推；不冻就用真实时钟，别混着用。
         day = self.store.today_key()
-        self.assertEqual(self.store.add(250, now=dt.datetime(2026, 10, 9, 9, 0)), 250)
-        self.assertEqual(self.store.add(300, now=dt.datetime(2026, 10, 9, 10, 0)), 550)
+        self.assertEqual(self.store.add(250), 250)
+        self.assertEqual(self.store.add(300), 550)
         self.assertEqual(self.store.total(day), 550)
         self.assertEqual(self.store.count(day), 2)
 
@@ -256,10 +261,9 @@ class TestStore(TempCase):
         self.assertEqual(self.store.pop_last(), (0, 0))
 
     def test_pop_last(self):
-        now = dt.datetime(2026, 10, 9, 9, 0)
-        self.store.add(200, now=now)
-        self.store.add(350, now=now)
         day = self.store.today_key()
+        self.store.add(200)
+        self.store.add(350)
         self.assertEqual(self.store.pop_last(day), (350, 1))
         self.assertEqual(self.store.total(day), 200)
         self.assertEqual(self.store.pop_last(day), (200, 0))
@@ -368,6 +372,30 @@ class TestLog(TempCase):
             core.log("写不进去也不该抛")
         except Exception as exc:                                # noqa: BLE001
             self.fail("log 抛异常了：%s" % exc)
+
+
+# ---------------------------------------------------------------- 用例自身的体检
+
+
+class TestNoDateBombs(unittest.TestCase):
+    """
+    防的就是刚踩过的那次：往 Store 里塞一个写死的 now，读的时候却用 today_key()。
+    这种用例只在"写它的那天"绿，隔天自己红，而且红的是测试不是产品——
+    第二天来看的人只会得出"内核坏了"的错误结论。
+
+    调度/时段那类纯函数用固定时间戳是对的（输入进、断言出，不落盘），
+    所以这里只盯"写进按日期分格的数据层"这一种组合。
+    """
+
+    SRC = os.path.abspath(__file__)
+
+    def test_no_store_call_freezes_now(self):
+        with open(self.SRC, encoding="utf-8") as fh:
+            text = fh.read()
+        bad = re.findall(r"self\.store\.\w+\([^)\n]*now=dt\.datetime\(", text)
+        self.assertEqual(bad, [],
+                         "Store 调用里冻了 now：%s —— 读的时候 day 也要从同一个 now 推"
+                         % bad)
 
 
 if __name__ == "__main__":
