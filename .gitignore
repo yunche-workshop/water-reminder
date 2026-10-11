@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+venv/
+.venv/
+
+# 打包产物（exe 通过 GitHub Release 分发，不进仓库）
+build/
+dist/
+*.spec
+
+# 运行时数据
+data/
+config.json
+run.log
+*.log
+preview.log
+dev_start.log
+mem.txt
+
+# 图标生成预览图（人眼检查用，可重生成）
+assets/*_preview.png
